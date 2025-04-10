@@ -195,6 +195,18 @@ class ChatBot:
 
         #     await self.storage.store_recalled_message(event.message_id, time.time(), chat)
 
+    async def download_image_url(url: str) -> Optional[str]:
+        """带重试和超时的图片下载函数"""
+        async with httpx.AsyncClient(timeout=10) as client:
+            for _ in range(3):  # 最多重试3次
+                try:
+                    resp = await client.get(url)
+                    resp.raise_for_status()
+                    return base64.b64encode(resp.content).decode("utf-8")
+                except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                    await asyncio.sleep(1)
+            return None
+            
     async def handle_image_message(self, event: MessageEvent, bot: Bot) -> None:
         """修复后的图片消息处理器"""
         self.bot = bot
@@ -233,30 +245,62 @@ class ChatBot:
             return
 
         seg_list = []
-        # 处理图片段
+        # 优化后的处理图片段
         for segment in event.message:
             if segment.type == "image":
-                # 获取真实图片数据（根据协议适配器实现）
-                image_file = segment.data.get("file")
-                image_url = segment.data.get("url")
-                subtype = segment.data.get("sub_type")
-                try:
-                    #这里是私人emoji和图片
-                    image_data = await asyncio.wait_for(bot.get_image(file=image_file),timeout=2)#2s不响应自动切换一个解决方式
-                    file_path = image_data["file"]
-                    base64_str = local_file_to_base64(file_path)
-                    subtype = str(subtype) # 确保类型一致性
-                    if subtype == "0": #图片
-                        image_type = 'image'
-                    else:
-                        image_type = 'emoji'
-                except asyncio.TimeoutError:
-                    #这里是商店的emoji
-                    image_type = 'emoji'
-                    logger.info("切换url下载")
-                    base64_str = await download_image_url(image_url)
-                    #下载并且转换为base64
+                # 优先从消息段提取 url 和 file 参数
+                image_url = segment.data.get("url", "")  # 确保默认值防止 KeyError
+                image_file = segment.data.get("file", "")
+                subtype = segment.data.get("sub_type", 0)  # 默认 subtype=0 (普通图片)
 
+                # 调试日志：打印关键参数
+                logger.debug(f"开始处理图片段 | URL={image_url[:30]}... | File={image_file[:20]}...")
+
+                base64_str = None
+                retry_count = 0
+                max_retries = 2  # 最大重试次数
+
+                # 阶段1：优先使用 URL 下载
+                while retry_count < max_retries and not base64_str:
+                    try:
+                        # 尝试通过 URL 下载图片 (优先方案)
+                        base64_str = await download_image_url(image_url)
+                        if base64_str:
+                            logger.debug("通过 URL 下载图片成功")
+                            break
+                    except Exception as e:
+                        logger.warning(f"URL 下载失败 (尝试 {retry_count + 1}/{max_retries}): {str(e)}")
+                        retry_count += 1
+                        await asyncio.sleep(0.5)  # 短暂等待后重试
+
+                # 阶段2：如果 URL 无效，尝试通过 file 调用 API
+                if not base64_str and image_file:
+                    try:
+                        # 有限时间内调用 get_image API (备用方案)
+                        image_data = await asyncio.wait_for(
+                            bot.get_image(file=image_file),
+                            timeout=2
+                            )
+                        file_path = image_data.get("file", "")
+                        if file_path:
+                            base64_str = local_file_to_base64(file_path)
+                            logger.debug("通过 file API 获取图片成功")
+                        else:
+                            logger.error("get_image 返回无效文件路径")
+                    except ActionFailed as e:
+                        logger.error(f"API 调用失败: {e.info}")
+                    except (asyncio.TimeoutError, KeyError) as e:
+                        logger.warning(f"备用方案超时或数据异常: {str(e)}")
+                    except Exception as e:
+                        logger.error(f"备用方案未知错误: {str(e)}")
+
+                # 最终回退逻辑
+                if not base64_str:
+                    logger.error("所有图片获取方案均失败")
+                    base64_str = "[图片丢失]"  # 可替换为默认占位图
+
+                # 根据 subtype 标记类型
+                image_type = "emoji" if subtype != 0 else "image"
                 # logger.info(image_type)
                 seg_list.append(Seg(type = image_type,data = base64_str))
             elif segment.type == "text" :
