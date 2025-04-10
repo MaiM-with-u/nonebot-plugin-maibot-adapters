@@ -6,6 +6,8 @@ from nonebot import logger
 import ssl
 from PIL import Image
 from io import BytesIO
+from aiohttp import ClientSession, ClientTimeout, TCPConnector
+from yarl import URL
 
 def local_file_to_base64(file_path: str) -> str:
     # 读取本地图片文件
@@ -91,11 +93,6 @@ def base64_to_image(base64_str: str, save_dir: str = "data/images") -> str:
         raise ValueError(f"图片处理失败: {str(e)}")
 
 async def download_image_url(url: str) -> str:
-    try:
-        import ssl
-        from aiohttp import ClientSession, ClientTimeout, TCPConnector
-        from yarl import URL
-
         # 使用yarl解析URL获取主机名
         try:
             parsed_url = URL(url)
