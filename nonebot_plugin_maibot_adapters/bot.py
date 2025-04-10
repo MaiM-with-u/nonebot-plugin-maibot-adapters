@@ -194,18 +194,6 @@ class ChatBot:
         #     )
 
         #     await self.storage.store_recalled_message(event.message_id, time.time(), chat)
-
-    async def download_image_url(url: str) -> Optional[str]:
-        """带重试和超时的图片下载函数"""
-        async with httpx.AsyncClient(timeout=10) as client:
-            for _ in range(3):  # 最多重试3次
-                try:
-                    resp = await client.get(url)
-                    resp.raise_for_status()
-                    return base64.b64encode(resp.content).decode("utf-8")
-                except (httpx.RequestError, httpx.HTTPStatusError) as e:
-                    await asyncio.sleep(1)
-            return None
             
     async def handle_image_message(self, event: MessageEvent, bot: Bot) -> None:
         """修复后的图片消息处理器"""
