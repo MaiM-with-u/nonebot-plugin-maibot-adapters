@@ -320,7 +320,7 @@ class ChatBot:
                                    group_name=(await bot.get_group_info(group_id = event.group_id,no_cache=True))["group_name"], 
                                    platform=config.platfrom)
 
-        message_content =  f"回复{event.reply.sender.nickname}({event.reply.sender.user_id})的消息，说："
+        message_content =  f"[回复 {event.reply.sender.nickname}({event.reply.sender.user_id})：{event.reply.message}]，说："
         # message_content += f"-{event.reply.sender.nickname}(id{event.reply.user_id}):{event.reply.message}\n回复了以下信息："
         message_content+=event.get_plaintext()
         # logger.info(f"\n\n\n{message_content}\n\n\n")
