@@ -91,16 +91,55 @@ def base64_to_image(base64_str: str, save_dir: str = "data/images") -> str:
         raise ValueError(f"图片处理失败: {str(e)}")
 
 async def download_image_url(url: str) -> str:
-    """直接返回 Base64 字符串"""
     try:
-        # 创建 SSL 上下文，禁用 SSLv3，允许 TLS 1.2+
-        ssl_context = ssl.create_default_context()
-        ssl_context.options |= ssl.OP_NO_SSLv3  # 禁用 SSLv3
-        ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2  # 强制 TLS 1.2+（Python 3.7+）
+        import ssl
+        from aiohttp import ClientSession, ClientTimeout, TCPConnector
+        from yarl import URL
 
-        async with aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=10),
-            connector=aiohttp.TCPConnector(ssl=ssl_context)  # 应用自定义 SSL 配置
+        # 使用yarl解析URL获取主机名
+        try:
+            parsed_url = URL(url)
+            hostname = parsed_url.host
+        except Exception as e:
+            logger.error(f"URL解析失败: {url} - {str(e)}")
+            raise ValueError(f"无效的URL格式: {url}")
+
+        # 确保成功提取主机名
+        if not hostname:
+            logger.error(f"无法从URL中提取主机名: {url}")
+            raise ValueError("URL中缺少有效的主机名")
+
+        # 创建自定义SSL上下文
+        ssl_context = ssl.create_default_context()
+        
+        # 禁用不安全协议
+        ssl_context.options |= (
+            ssl.OP_NO_SSLv3 |
+            ssl.OP_NO_TLSv1 |
+            ssl.OP_NO_TLSv1_1
+        )
+        ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2  # 强制使用TLSv1.2+
+
+        # 配置加密套件：
+        # - DEFAULT: 使用OpenSSL默认的安全套件
+        # - !aNULL: 禁用无身份验证的套件（易受中间人攻击）
+        # - !eNULL: 禁用无加密的套件
+        # - !MD5: 禁用使用MD5哈希的套件（已不安全）
+        # - !3DES: 禁用三重DES（性能差且存在SWEET32攻击风险）
+        # - !DES: 禁用DES（密钥长度过短）
+        ssl_context.set_ciphers('DEFAULT:!aNULL:!eNULL:!MD5:!3DES:!DES')
+
+        # 显式设置SNI
+        # 避免某些服务器因缺少SNI信息而拒绝连接
+        ssl_context.server_hostname = hostname
+
+        # 创建带自定义SSL上下文的连接器
+        connector = TCPConnector(ssl=ssl_context)
+
+        # 增加超时时间至20秒
+        async with ClientSession(
+            timeout=ClientTimeout(total=20),
+            connector=connector
         ) as session:
             async with session.get(url) as resp:
                 resp.raise_for_status()
